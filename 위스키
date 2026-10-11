@@ -1,0 +1,214 @@
+{"name":"whisky-compass","private":true,"type":"module","scripts":{"test":"node tests/recommend.test.js","start":"node server.js"}}
+
+# Whisky Compass
+
+설치형 라이브러리나 유료 API 없이 브라우저에서 취향을 분석하는 반응형 위스키 가이드입니다.
+
+## 실행
+
+Windows에서는 `start.cmd`를 실행한 뒤 http://127.0.0.1:4173 에 접속하세요. 설치된 Node.js 또는 현재 Codex의 Node.js 런타임을 자동으로 찾습니다. 다른 환경에서는 Node.js가 설치된 상태에서 이 폴더를 열고 `npm start` 또는 `node server.js`를 실행하세요. 파일을 더블 클릭하는 file:// 방식은 ES 모듈 보안 정책 때문에 지원하지 않습니다. 호스팅에는 `dist/` 폴더를 정적 파일로 올리면 됩니다.
+
+## 구조
+
+- `dist/index.html`: 메인 화면과 접근성 구조
+- `dist/styles.css`: 다크 브라운·골드 디자인, 반응형 레이아웃, 전환 효과
+- `dist/app.js`: 단계별 설문, 상태 유지, 레이더 SVG, 결과·상세 대화상자, 복사 및 수동 복사 대안
+- `dist/data.js`: 실제 위스키 13종, 풍미·가격·음용 방식·브랜드 공식 정보 링크
+- `dist/recommend.js`: UI와 분리된 추천 함수, API 교체용 비동기 공급자
+- `tests/recommend.test.js`: 추천·데이터 검증
+- `server.js`: 추가 패키지 없는 로컬 정적 서버
+- `start.cmd`: Windows 실행 도우미
+- `.openai/hosting.json`: Sites 정적 배포 설정
+
+## 추천 원리
+
+총점 = 풍미 유사도 × 60 + 예산 적합성 × 20 + 경험 수준 × 10 + 음용 방식 × 10.
+
+풍미 유사도는 `1 - sqrt(sum((제품점수 - 사용자점수)^2) / 5) / 5`입니다. 예산 적합성은 예상 가격 중간값이 선택 구간 안에 있으면 1, 구간 밖이면 거리만큼 감점합니다. 경험이 제품 난이도 이상이면 1, 낮으면 한 단계당 0.45를 감점합니다. 선택 음용 방식이 권장 방식에 포함되면 1, 아니면 0.25입니다. 음용 방식 '모름'은 감점하지 않습니다.
+
+예산 구간은 중간값 기준 ≤5만 / >5만~≤10만 / >10만~<20만 / ≥20만입니다. 예산 적합 제품을 먼저 배치하고 같은 그룹 내에서는 총점 내림차순으로 정렬합니다. 예산 내 제품이 3개 미만이면 다른 가격대의 대안과 이유를 표시합니다. 20만 원 이상에는 2종이 있어 대안 안내를 실제로 확인할 수 있습니다.
+
+일치도는 반올림한 가중 점수로, 만족 확률이 아닙니다. 풍미 점수와 가격대는 참고용 추정치이며 실시간 판매가가 아닙니다. 제품 특징은 파일 내 브랜드 공식 링크를 참고했습니다. 음용 방식은 서비스의 제안입니다. 입력은 메모리에서 처리되고 저장·전송하지 않습니다. 외부 요청은 Google Fonts와 Unsplash 이미지 로딩에만 사용합니다. 사진은 분위기 이미지이며 추천 카드의 병은 제품 사진이 아닌 공통 일러스트입니다.
+
+## 검증
+
+`npm test` 또는 `node tests/recommend.test.js`로 실행합니다. 13종 데이터 무결성, 네 예산 구간의 우선순위, 풍미에 따른 순위 변화, 경험·음용 방식 가중치, 0~100점 범위, 반복 실행 일관성, 예산 대안과 잘못된 입력 처리를 확인합니다.
+
+브라우저에서는 설문 시작, 미선택 다음 버튼 비활성화, 슬라이더 변경, 4단계 이동, TOP 3와 예산 외 안내, 레이더 차트, 제품 상세, 복사 성공 안내와 다시 테스트 초기화를 확인했습니다. 390px 모바일 및 1440px 데스크톱에서 가로 넘침이 없음을 확인했습니다. 외부 이미지와 폰트가 차단되더라도 기본 배경·시스템 글꼴로 기능은 동작합니다.
+
+비공개 Sites 프로젝트는 등록되었지만, 이 PC에 Git 실행 파일이 없어 소스 업로드·온라인 배포는 완료하지 못했습니다. 로컬 웹사이트와 추천 기능은 완성되어 있으며 위 방법으로 실행할 수 있습니다.
+
+import http from 'node:http';
+import {readFile} from 'node:fs/promises';
+import {fileURLToPath} from 'node:url';
+import path from 'node:path';
+const root=path.resolve(fileURLToPath(new URL('./dist/',import.meta.url)));
+const types={'.html':'text/html; charset=utf-8','.css':'text/css; charset=utf-8','.js':'text/javascript; charset=utf-8','.svg':'image/svg+xml'};
+http.createServer(async(req,res)=>{try{const pathname=decodeURIComponent(new URL(req.url,'http://localhost').pathname);const file=path.resolve(root,'.'+(pathname==='/'?'/index.html':pathname));if(!file.startsWith(root+path.sep)&&file!==path.join(root,'index.html')){res.writeHead(403).end();return;}const data=await readFile(file);res.writeHead(200,{'Content-Type':types[path.extname(file)]||'application/octet-stream'});res.end(data);}catch{res.writeHead(404).end('Not found');}}).listen(4173,'127.0.0.1',()=>console.log('Whisky Compass: http://127.0.0.1:4173'));
+
+@echo off
+setlocal
+cd /d "%~dp0"
+where node >nul 2>&1
+if not errorlevel 1 (
+  node server.js
+  goto done
+)
+set "COMPASS_NODE="
+for /d %%D in ("%LOCALAPPDATA%\OpenAI\Codex\runtimes\cua_node\*") do (
+  if exist "%%D\bin\node.exe" set "COMPASS_NODE=%%D\bin\node.exe"
+)
+if defined COMPASS_NODE (
+  "%COMPASS_NODE%" server.js
+) else (
+  echo Node.js is required. Install Node.js, then run start.cmd again.
+  pause
+)
+:done
+endlocal
+
+{
+  "project_id": "appgprj_6acba6d7d4a88191b72be0fd20416c29",
+  "static": {"directory": "dist"}
+}
+
+import {flavors,servingLabels,budgetLabels} from './data.js';
+import {recommendationProvider,WEIGHTS} from './recommend.js';
+const $=s=>document.querySelector(s);
+const experienceLabels=['처음 마셔봅니다.','가끔 즐기는 편입니다.','위스키를 자주 즐깁니다.'];
+const englishFlavors=['Sweet','Fruity','Smoky','Spicy','Woody'];
+const newProfile=()=>({experience:null,flavors:[3,3,0,2,2],budget:null,serving:null});
+let profile=newProfile(),step=0,result=null,busy=false,toastTimer;
+function show(view){for(const id of ['home','survey','results'])$('#'+id).hidden=id!==view;window.scrollTo({top:0,behavior:'instant'});const heading=$('#'+view+' h1');if(heading){heading.tabIndex=-1;heading.focus({preventScroll:true});}}
+function start(){profile=newProfile();step=0;result=null;renderSurvey();show('survey');}
+function radio(name,value,title,description=''){return `<label class="option"><input type="radio" name="${name}" value="${value}" ${String(profile[name])===String(value)?'checked':''}><span>${title}${description?`<small>${description}</small>`:''}</span></label>`;}
+function renderSurvey(){
+ const titles=['위스키를 얼마나 경험해 보셨나요?','어떤 풍미를 선호하시나요?','위스키 구매 예산은 어느 정도인가요?','어떤 방식으로 위스키를 즐기고 싶나요?'];
+ const help=['지금의 경험에 맞춰 편안한 한 잔을 찾아드릴게요.','0은 선호하지 않음, 5는 강하게 선호함을 뜻해요.','700~750ml 한 병 기준의 참고 가격으로 안내해요.','잘 모르겠다면 제품에 어울리는 방식을 알려드릴게요.'];
+ let content='';
+ if(step===0)content=experienceLabels.map((x,i)=>radio('experience',i,x,['부드럽고 편안한 첫 한 잔을 찾고 있어요.','취향을 조금 더 알아가고 싶어요.','개성 있는 풍미까지 탐험하고 싶어요.'][i])).join('');
+ if(step===1)content=flavors.map((x,i)=>`<div class="slider-row"><div class="slider-head"><label for="flavor-${i}">${x}<small>${['꿀 · 바닐라 · 캐러멜','사과 · 배 · 말린 과일','피트 · 장작 연기','후추 · 시나몬','나무 · 구운 오크'][i]}</small></label><output for="flavor-${i}" id="value-${i}">${profile.flavors[i]} <span>/ 5</span></output></div><input id="flavor-${i}" data-flavor="${i}" type="range" min="0" max="5" step="1" value="${profile.flavors[i]}" aria-valuetext="${profile.flavors[i]}점"><div class="slider-scale"><span>0 · 선호하지 않아요</span><span>강하게 선호해요 · 5</span></div></div>`).join('');
+ if(step===2)content=budgetLabels.map((x,i)=>radio('budget',i,x)).join('');
+ if(step===3)content=[['neat','니트 (그대로 마시기)','위스키 본연의 향과 맛을 천천히.'],['rocks','온더락 (얼음과 함께)','차갑고 부드럽게, 느긋한 한 잔.'],['highball','하이볼 (탄산수와 함께)','가볍고 산뜻하게 즐기는 방식.'],['unknown','아직 잘 모르겠습니다.','나에게 맞는 방식도 함께 추천해 주세요.']].map(x=>radio('serving',...x)).join('');
+ $('#survey').innerHTML=`<div class="survey-top"><span>FIND YOUR DIRECTION</span><span>0${step+1} / 04</span></div><div class="progress" role="progressbar" aria-label="설문 진행률" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${(step+1)*25}"><div style="width:${(step+1)*25}%"></div></div><form id="survey-form"><p class="step-label">Step 0${step+1}</p><h1 id="survey-heading">${titles[step]}</h1><p class="help">${help[step]}</p><div class="${step===1?'sliders':'options'}" role="group" aria-labelledby="survey-heading">${content}</div><div class="survey-actions"><button class="secondary" type="button" id="back">← ${step===0?'처음으로':'이전'}</button><button class="primary" id="next" type="submit" ${validStep()?'':'disabled'}>${step===3?'내 위스키 추천받기':'다음 단계'} <span>→</span></button></div></form>`;
+ $('#survey-form').addEventListener('change',e=>{if(e.target.type==='radio'){profile[e.target.name]=e.target.name==='serving'?e.target.value:Number(e.target.value);$('#next').disabled=!validStep();}});
+ $('#survey-form').addEventListener('input',e=>{if(e.target.dataset.flavor!==undefined){const i=Number(e.target.dataset.flavor);profile.flavors[i]=Number(e.target.value);$('#value-'+i).innerHTML=`${e.target.value} <span>/ 5</span>`;e.target.setAttribute('aria-valuetext',`${e.target.value}점`);}});
+ $('#back').onclick=()=>{if(step===0)show('home');else{step--;renderSurvey();focusQuestion();}};
+ $('#survey-form').onsubmit=async e=>{e.preventDefault();if(!validStep()||busy)return;if(step<3){step++;renderSurvey();focusQuestion();return;}busy=true;$('#next').disabled=true;$('#next').textContent='취향을 분석하고 있어요…';try{result=await recommendationProvider.recommend(profile);renderResults();show('results');}catch(error){toast('추천을 불러오지 못했습니다. 다시 시도해 주세요.');$('#next').disabled=false;$('#next').textContent='내 위스키 추천받기 →';}finally{busy=false;}};
+}
+function validStep(){return step===1||profile[['experience','flavors','budget','serving'][step]]!==null;}
+function focusQuestion(){const h=$('#survey-heading');h.tabIndex=-1;h.focus();}
+function radar(){
+ const point=(i,r)=>[170+Math.sin(i*2*Math.PI/5)*r,132-Math.cos(i*2*Math.PI/5)*r];
+ const points=r=>Array.from({length:5},(_,i)=>point(i,r).join(',')).join(' ');
+ return `<svg class="radar" viewBox="0 0 340 270" role="img" aria-labelledby="radar-title radar-desc"><title id="radar-title">사용자 취향 레이더 차트</title><desc id="radar-desc">${flavors.map((f,i)=>f+' '+profile.flavors[i]+'점').join(', ')}</desc>${[1,2,3,4,5].map(v=>`<polygon points="${points(v*18)}" fill="none" stroke="#484033" stroke-width=".7"/>`).join('')}${englishFlavors.map((f,i)=>{const [x,y]=point(i,118),[ax,ay]=point(i,90);return `<line x1="170" y1="132" x2="${ax}" y2="${ay}" stroke="#484033" stroke-width=".7"/><text x="${x}" y="${y+4}" text-anchor="middle" fill="#c3b79e" font-size="11" font-family="Georgia">${f}</text>`;}).join('')}<polygon points="${profile.flavors.map((v,i)=>point(i,v*18).join(',')).join(' ')}" fill="#c9a76b33" stroke="#c9a76b" stroke-width="2"/>${profile.flavors.map((v,i)=>{const [x,y]=point(i,v*18);return `<circle cx="${x}" cy="${y}" r="3" fill="#d9bb84"/>`;}).join('')}<text x="176" y="46" fill="#8d826d" font-size="8">5</text></svg>`;
+}
+const price=w=>`${(w.price[0]/10000).toLocaleString('ko-KR')}~${(w.price[1]/10000).toLocaleString('ko-KR')}만 원`;
+function servingFor(w){return servingLabels[w.servings.includes(profile.serving)?profile.serving:w.servings[0]];}
+function renderResults(){
+ $('#results').innerHTML=`<div class="results-intro"><p class="eyebrow">YOUR WHISKY, YOUR DIRECTION</p><h1 id="results-heading">당신에게 어울리는<br>위스키를 찾았습니다.</h1><p class="help">당신의 감각으로 완성한, 세 가지 새로운 발견.</p></div><section class="taste-panel" aria-label="사용자 취향 분석"><div><p class="eyebrow">YOUR TASTE PROFILE</p><h2>나의 취향 지도</h2><div class="profile-pills"><span class="pill">${['입문자','가끔 즐김','자주 즐김'][profile.experience]}</span><span class="pill">${budgetLabels[profile.budget]}</span><span class="pill">${servingLabels[profile.serving]}</span></div><p class="flavor-values">${flavors.map((f,i)=>`${f} <strong>${profile.flavors[i]}</strong>`).join(' &nbsp;·&nbsp; ')}</p><p class="help">다섯 가지 감각, 나만의 균형을 만나보세요.</p></div>${radar()}</section><div class="results-title"><h2>추천 위스키 <em>TOP 3</em></h2><small>예산 적합 제품 우선 · 가중 추천 점수 기준</small></div>${result.notice?`<p class="notice">${result.notice}</p>`:''}<div class="result-grid">${result.items.map((w,i)=>`<article class="whisky-card"><div class="card-top"><span class="rank">0${i+1}</span><span class="match">취향 일치도 <strong>${w.score}</strong>%</span></div><div class="bottle-art" aria-hidden="true"><div class="bottle"><div class="bottle-label">WHISKY<small>COMPASS SELECTION</small></div></div><small>제품 이미지가 아닌 일러스트</small></div><p class="card-type">${w.type}</p><h3>${w.name}</h3><p class="english">${w.english}</p><div class="notes">${w.notes.map(n=>`<span>${n}</span>`).join('')}</div><p class="reason">${w.reasons[0]} ${w.inBudget?w.reasons[3]:w.reasons[1]}</p><div class="card-meta"><div><small>예상 가격대</small>${price(w)}${w.inBudget?'':' · 예산 외'}</div><div><small>추천 음용 방식</small>${servingFor(w)}</div></div><button class="secondary detail-button" data-detail="${w.id}" aria-label="${w.name} 자세히 보기">자세히 보기 <span>↗</span></button></article>`).join('')}</div><p class="data-note">풍미 점수(0~5)와 음용 방식은 참고용 추정·제안입니다. 가격은 국내 700~750ml 한 병의 예시 범위로, 실시간 판매가가 아니며 구매처·시점·용량에 따라 달라집니다. 예산 분류는 예상 가격 중간값 기준입니다.<br>취향 일치도는 풍미·예산·경험·음용 방식의 가중 점수이며 실제 만족도를 보장하는 수치가 아닙니다.</p><div class="result-actions"><button class="secondary" data-action="start">↻ &nbsp; 다시 테스트하기</button><button class="primary" id="copy-result">결과 복사하기 <span>↗</span></button></div><details class="method"><summary>추천은 어떻게 계산되나요?</summary><p>풍미 유사도 60% + 예산 적합성 20% + 경험 수준 10% + 음용 방식 10%를 합산합니다. 다섯 풍미 점수의 평균 제곱 오차에 제곱근을 적용해 거리를 구하며, 거리가 작을수록 유사도가 높습니다. 예산에 맞는 제품을 먼저 배치한 후 가중 점수가 높은 순으로 추천합니다. 등록된 예산 내 제품이 3종보다 적으면 예산 외 대안을 명확히 표시합니다. 외부 AI API 없이 브라우저에서 계산하며 입력은 서버로 전송하지 않습니다.</p></details>`;
+ $('#copy-result').onclick=copyResults;
+ $('#results').querySelectorAll('[data-detail]').forEach(b=>b.onclick=()=>openDetail(b.dataset.detail));
+}
+function openDetail(id){const w=result.items.find(x=>x.id===id);$('#detail-content').innerHTML=`<p class="eyebrow">THE COMPASS SELECTION</p><h2>${w.name}</h2><p>${w.english} · ${w.type}</p><div class="notes">${w.notes.map(n=>`<span>${n}</span>`).join('')}</div><p>${w.description}</p><h3>당신에게 추천하는 이유</h3><ul>${w.reasons.map(r=>`<li>${r}</li>`).join('')}</ul><h3>취향 일치도 ${w.score}%의 구성</h3>${Object.entries(WEIGHTS).map(([k,v],i)=>`<div class="score-line"><span>${['풍미 유사도','예산 적합성','경험 수준','음용 방식'][i]} (${v*100}%)</span><span>${(w.components[k]*v*100).toFixed(1)}점 / ${v*100}</span></div>`).join('')}<h3>제품 풍미 · 참고용 추정치</h3><p>${flavors.map((f,i)=>`${f} ${w.flavors[i]}/5`).join(' · ')}</p><h3>한 잔을 위한 가이드</h3><p>예상 가격: ${price(w)}<br>추천 방식: ${w.servings.map(s=>servingLabels[s]).join(' / ')}<br>${servingFor(w)==='니트'?'작은 잔에 소량을 따르고 향부터 천천히 살펴보세요.':servingFor(w)==='온더락'?'큰 얼음을 넣고 녹아가는 동안 풍미의 변화를 느껴보세요.':'위스키 1 : 탄산수 3~4 비율로 가볍게 시작해 보세요.'}</p><p class="data-note">가격·풍미는 참고용이며 공식 수치가 아닙니다.</p><br><a href="${w.source}" target="_blank" rel="noopener noreferrer">브랜드 공식 제품 정보 ↗</a>`;$('#detail').showModal();}
+function resultText(){return `Whisky Compass — 나의 위스키 추천\n경험: ${experienceLabels[profile.experience]}\n예산: ${budgetLabels[profile.budget]}\n음용 방식: ${servingLabels[profile.serving]}\n취향: ${flavors.map((f,i)=>f+' '+profile.flavors[i]+'/5').join(', ')}\n\n${result.items.map((w,i)=>`${i+1}. ${w.name} (${w.type}) — 일치도 ${w.score}%\n주요 풍미: ${w.notes.join(', ')}\n예상 가격: ${price(w)}${w.inBudget?'':' (예산 외 대안)'} / 추천 방식: ${servingFor(w)}\n${w.reasons.join(' ')}`).join('\n\n')}\n\n${result.notice}\n풍미·가격은 참고용 추정치이며 실시간 판매가가 아닙니다. 일치도는 규칙 기반 가중 추천 점수입니다.`;}
+async function copyResults(){const text=resultText();try{if(!navigator.clipboard?.writeText)throw new Error('clipboard unavailable');await navigator.clipboard.writeText(text);toast('추천 결과를 복사했습니다.');}catch{const d=$('#copy-fallback');d.querySelector('textarea').value=text;d.showModal();d.querySelector('textarea').select();}}
+function toast(message){$('#toast').textContent=message;$('#toast').classList.add('show');clearTimeout(toastTimer);toastTimer=setTimeout(()=>$('#toast').classList.remove('show'),3000);}
+document.addEventListener('click',e=>{const b=e.target.closest('[data-action]');if(b){if(b.dataset.action==='start')start();else show('home');}const brand=e.target.closest('a.brand');if(brand){e.preventDefault();show('home');}});
+document.querySelectorAll('dialog').forEach(d=>{d.querySelector('.close').onclick=()=>d.close();d.addEventListener('click',e=>{if(e.target===d){const r=d.getBoundingClientRect();if(e.clientX<r.left||e.clientX>r.right||e.clientY<r.top||e.clientY>r.bottom)d.close();}});});
+$('#select-copy').onclick=()=>{$('#copy-fallback textarea').focus();$('#copy-fallback textarea').select();};
+
+// 풍미 0–5와 국내 700–750ml 예상 가격은 서비스용 추정치이며 실시간 시세가 아닙니다.
+// 풍미 배열 순서: Sweet, Fruity, Smoky, Spicy, Woody.
+const rows = [
+ ['jameson','제임슨 오리지널','Jameson Original','아이리시 블렌디드',['바닐라','과일','은은한 향신료'],[3,3,0,2,2],[30000,45000],0,['highball','rocks'],'가벼운 과일향과 바닐라가 어우러지는 아이리시 위스키입니다.','https://www.jamesonwhiskey.com/en/our-whiskey/jameson-original/'],
+ ['beam','짐 빔 화이트','Jim Beam White','켄터키 버번',['캐러멜','바닐라','오크'],[4,1,0,3,3],[25000,40000],0,['highball','rocks'],'새 오크통에서 오는 캐러멜과 바닐라의 인상이 특징입니다.','https://www.jimbeam.com/en-us/bourbons/original'],
+ ['red','조니워커 레드 라벨','Johnnie Walker Red Label','블렌디드 스카치',['향신료','과일','스모크'],[2,2,2,4,2],[25000,40000],1,['highball'],'향신료와 스모크가 탄산수와 함께 선명하게 드러납니다.','https://www.johnniewalker.com/en-gb/our-whisky/core-range/johnnie-walker-red-label-blended-scotch-whisky-70cl'],
+ ['black','조니워커 블랙 라벨 12년','Johnnie Walker Black Label','블렌디드 스카치',['바닐라','말린 과일','스모크'],[3,3,3,2,3],[50000,75000],1,['rocks','highball','neat'],'부드러운 단맛에 스모키한 여운이 더해지는 블렌드입니다.','https://www.johnniewalker.com/en/our-whisky/core-range/johnnie-walker-black-label'],
+ ['barrel','제임슨 블랙 배럴','Jameson Black Barrel','아이리시 블렌디드',['토피','바닐라','오크'],[4,2,0,3,4],[55000,80000],0,['rocks','neat'],'짙게 그을린 배럴의 영향을 받아 토피와 오크가 풍부합니다.','https://www.jamesonwhiskey.com/en-us/our-whiskey/jameson-black-barrel/'],
+ ['gf12','글렌피딕 12년','Glenfiddich 12','스페이사이드 싱글몰트',['배','바닐라','오크'],[3,5,0,1,2],[65000,95000],0,['neat','rocks'],'신선한 배를 떠올리는 과일향과 부드러운 질감이 특징입니다.','https://www.glenfiddich.com/12-year-old'],
+ ['gl12','글렌리벳 12년','The Glenlivet 12','스페이사이드 싱글몰트',['과일','바닐라','꽃'],[3,4,0,2,2],[65000,95000],0,['neat','rocks'],'산뜻한 과일향과 바닐라가 균형을 이루는 싱글몰트입니다.','https://www.theglenlivet.com/en/whisky/12-year-old-single-malt-scotch/'],
+ ['gf15','글렌피딕 15년','Glenfiddich 15','스페이사이드 싱글몰트',['꿀','말린 과일','향신료'],[4,4,0,3,3],[105000,150000],1,['neat'],'솔레라 방식으로 조화로운 꿀, 과일, 향신료의 인상을 만듭니다.','https://www.glenfiddich.com/assets/Uploads/Shared/OnlineMentoring/pdfs/Online-MentoringDownload15.pdf'],
+ ['gold','조니워커 골드 라벨 리저브','Johnnie Walker Gold Label Reserve','블렌디드 스카치',['꿀','바닐라','은은한 스모크'],[5,3,2,2,3],[100000,140000],1,['rocks','neat'],'꿀 같은 단맛과 부드러운 스모크가 어우러집니다.','https://www.johnniewalker.com/en/our-whisky/core-range/johnnie-walker-gold-label-reserve'],
+ ['laph','라프로익 10년','Laphroaig 10','아일라 싱글몰트',['피트','바다','바닐라'],[2,1,5,3,3],[100000,145000],2,['neat'],'강렬한 피트 연기와 바다를 연상시키는 개성 있는 향이 특징입니다.','https://www.laphroaig.com/en-gb/whiskies/10-year-old'],
+ ['ard','아드벡 10년','Ardbeg Ten','아일라 싱글몰트',['피트','시트러스','토피'],[3,2,5,3,3],[110000,160000],2,['neat'],'짙은 스모크에 시트러스와 달콤한 토피의 인상이 겹쳐집니다.','https://www.ardbeg.com/en-int/collections/all-whisky'],
+ ['gf18','글렌피딕 18년','Glenfiddich 18','스페이사이드 싱글몰트',['구운 사과','말린 과일','오크'],[4,4,0,3,5],[210000,290000],1,['neat'],'숙성된 과일과 깊은 오크의 풍미를 천천히 즐기기 좋습니다.','https://shop.us.glenfiddich.com/products/glenfiddich-18-year-old'],
+ ['gl18','글렌리벳 18년','The Glenlivet 18','스페이사이드 싱글몰트',['과일','버터스카치','향신료'],[4,5,0,3,4],[210000,300000],1,['neat'],'풍부한 과일과 바닐라 버터스카치, 따뜻한 향신료의 깊이가 있습니다.','https://www.theglenlivet.com/en-gb/whisky/18-year-old-single-malt-scotch/']
+];
+export const whiskies = rows.map(([id,name,english,type,notes,flavors,price,level,servings,description,source])=>({id,name,english,type,notes,flavors,price,level,servings,description,source}));
+export const flavors = ['달콤함','과일향','스모키함','스파이시함','오크향'];
+export const servingLabels = {neat:'니트',rocks:'온더락',highball:'하이볼',unknown:'아직 잘 모르겠습니다'};
+export const budgetLabels = ['5만 원 이하','5만~10만 원','10만~20만 원','20만 원 이상'];
+
+<!doctype html>
+<html lang="ko"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1"><meta name="theme-color" content="#171612"><meta name="description" content="다섯 가지 풍미와 예산, 경험을 분석해 나에게 어울리는 위스키를 발견하세요."><title>Whisky Compass — 당신의 취향을 찾아주는 위스키 가이드</title><link rel="stylesheet" href="styles.css"><script type="module" src="app.js"></script></head>
+<body>
+ <header class="site-header"><a class="brand" href="#" aria-label="Whisky Compass 홈"><span class="brand-icon">✧</span> WHISKY COMPASS</a><nav aria-label="주 메뉴"><button class="nav-link" data-action="home">위스키 가이드</button><button class="nav-cta" data-action="start">내 취향 찾기 <span>↗</span></button></nav></header>
+ <main id="app">
+  <section id="home" class="view">
+   <div class="hero">
+    <div class="hero-copy"><p class="eyebrow"><span></span> A JOURNEY TO YOUR TASTE</p><h1>Whisky<br><em>Compass</em><span class="title-dot">.</span></h1><h2>당신의 취향을 찾아주는 위스키 가이드</h2><p class="hero-desc">몇 가지 간단한 질문을 통해<br class="mobile-break"> 나에게 어울리는 위스키를 발견해 보세요.</p><button class="primary hero-button" data-action="start">내 취향 찾기 <span>↗</span></button><p class="micro">약 1분 소요 <span>·</span> 4단계 취향 분석</p></div>
+    <div class="hero-art" role="img" aria-label="따뜻한 빛 아래 놓인 위스키 잔"><div class="art-shade"></div><div class="compass-mark"><span>N</span><i>✧</i><small>FIND YOUR OWN DIRECTION</small></div><div class="art-caption"><span>EVERY TASTE HAS A DIRECTION</span><p>좋은 위스키의 시작은,<br>나의 취향을 아는 것.</p></div><span class="photo-index">01 — THE DISCOVERY</span></div>
+   </div>
+   <section class="journey" aria-labelledby="journey-title"><div class="section-intro"><p class="eyebrow">YOUR PERSONAL WHISKY GUIDE</p><h2 id="journey-title">취향은 다르니까,<br>위스키도 나답게.</h2><p>어려운 위스키 용어는 몰라도 괜찮아요.<br>당신의 감각을 따라가 보세요.</p></div><div class="journey-steps"><article><span class="step-number">01</span><div><h3>당신의 취향을 알려주세요</h3><p>경험부터 풍미, 예산과 즐기는 방식까지.</p></div><span class="step-symbol">◈</span></article><article><span class="step-number">02</span><div><h3>다섯 가지 풍미로 분석해요</h3><p>달콤함, 과일향, 스모크, 스파이스, 오크.</p></div><span class="step-symbol">✧</span></article><article><span class="step-number">03</span><div><h3>나만의 위스키를 발견하세요</h3><p>취향에 어울리는 TOP 3와 자세한 추천 이유.</p></div><span class="step-symbol">↗</span></article></div></section>
+   <div class="flavor-strip"><span>FIVE NOTES. YOUR DIRECTION.</span><p>SWEET <i>·</i> FRUITY <i>·</i> SMOKY <i>·</i> SPICY <i>·</i> WOODY</p></div>
+  </section>
+  <section id="survey" class="view survey-view" hidden aria-labelledby="survey-heading"></section>
+  <section id="results" class="view results-view" hidden aria-labelledby="results-heading"></section>
+ </main>
+ <footer><a class="brand" href="#"><span class="brand-icon">✧</span> WHISKY COMPASS</a><p>당신의 한 잔에, 더 나은 방향을.</p><small>성인을 위한 위스키 가이드 · 풍미와 가격은 참고용 추정치입니다.</small></footer>
+ <dialog id="detail"><button class="close" aria-label="닫기">×</button><div id="detail-content"></div></dialog>
+ <dialog id="copy-fallback"><button class="close" aria-label="닫기">×</button><h2>결과 복사하기</h2><p>아래 내용을 선택해 복사해 주세요.</p><textarea readonly aria-label="복사할 추천 결과"></textarea><button class="primary" id="select-copy">전체 선택</button></dialog>
+ <div id="toast" role="status" aria-live="polite"></div>
+ <noscript>취향 분석을 사용하려면 브라우저에서 JavaScript를 활성화해 주세요.</noscript>
+</body></html>
+
+import {whiskies,flavors,servingLabels} from './data.js';
+export const WEIGHTS = Object.freeze({flavor:.60,budget:.20,experience:.10,serving:.10});
+const bands = [[0,50000],[50000,100000],[100000,200000],[200000,Infinity]];
+// 중복 경계 방지: 첫 구간 <=5만, 두 번째 >5만 <=10만, 세 번째 >10만 <20만, 마지막 >=20만.
+export function fitsBudget(w,budget){const p=(w.price[0]+w.price[1])/2;return budget===0?p<=50000:budget===1?p>50000&&p<=100000:budget===2?p>100000&&p<200000:p>=200000;}
+export function recommend(profile,catalog=whiskies){
+ if(![0,1,2].includes(profile.experience)||![0,1,2,3].includes(profile.budget)||!Object.hasOwn(servingLabels,profile.serving)||profile.flavors.length!==5||profile.flavors.some(v=>!Number.isInteger(v)||v<0||v>5))throw new Error('설문 입력을 확인해 주세요.');
+ const ranked=catalog.map(w=>{
+  const flavor=1-Math.sqrt(w.flavors.reduce((s,v,i)=>s+(v-profile.flavors[i])**2,0)/5)/5;
+  const inBudget=fitsBudget(w,profile.budget),mid=(w.price[0]+w.price[1])/2,[lo,hi]=bands[profile.budget];
+  const distance=mid<lo?lo-mid:mid>hi?mid-hi:0;
+  const budget=inBudget?1:Math.max(0,1-distance/Math.max(lo,Number.isFinite(hi)?hi:lo,50000));
+  const experience=profile.experience>=w.level?1:Math.max(0,1-(w.level-profile.experience)*.45);
+  const serving=profile.serving==='unknown'?1:w.servings.includes(profile.serving)?1:.25;
+  const components={flavor,budget,experience,serving};
+  const raw=Object.entries(WEIGHTS).reduce((s,[k,v])=>s+components[k]*v,0);
+  const closest=w.flavors.map((v,i)=>({i,d:Math.abs(v-profile.flavors[i])})).sort((a,b)=>a.d-b.d).slice(0,2).map(x=>flavors[x.i]);
+  const reasons=[`${closest.join('·')} 강도가 선택한 취향과 잘 어울립니다.`,inBudget?'예상 가격의 중간값이 선택한 예산 구간에 해당합니다.':'선택 예산 구간 밖의 대안입니다. 예상 가격을 확인해 주세요.',profile.experience<w.level?'풍미가 강한 편이라 처음에는 소량으로 천천히 경험해 보세요.':'선택한 경험 수준에서 즐기기 좋은 풍미입니다.',profile.serving==='unknown'?`${servingLabels[w.servings[0]]}로 시작해 보세요.`:w.servings.includes(profile.serving)?`${servingLabels[profile.serving]}에 잘 어울립니다.`:`선택한 방식보다 ${servingLabels[w.servings[0]]}를 권합니다.`];
+  return {...w,score:Math.round(raw*100),raw,inBudget,components,reasons};
+ });
+ // 예산 적합 제품을 먼저 정렬하고, 같은 그룹 안에서 가중 점수 내림차순. 무작위 요소 없음.
+ ranked.sort((a,b)=>Number(b.inBudget)-Number(a.inBudget)||b.raw-a.raw||a.id.localeCompare(b.id));
+ const count=ranked.filter(w=>w.inBudget).length;
+ return {items:ranked.slice(0,3),notice:count>=3?'':count===0?'선택한 예산 구간에 등록된 제품이 없어 다른 가격대의 대안을 보여드립니다.':`선택한 예산 구간에는 ${count}종이 등록되어 있어 TOP 3의 나머지는 다른 가격대의 대안으로 채웠습니다.`};
+}
+// UI는 이 공급자만 호출합니다. 향후 API 공급자로 교체할 수 있습니다.
+export const recommendationProvider={recommend:async profile=>recommend(profile)};
+
+@import url('https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,400;0,500;0,600;1,400;1,500&family=Noto+Sans+KR:wght@400;500;600;700&display=swap');
+:root{--bg:#171612;--panel:#201e19;--line:#3a352b;--gold:#c9a76b;--cream:#f0e9dd;--muted:#aaa396;--serif:'Cormorant Garamond',Georgia,serif}*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--cream);font-family:'Noto Sans KR',sans-serif;font-size:14px;-webkit-font-smoothing:antialiased}button,a,input{ -webkit-tap-highlight-color:transparent}button{font:inherit;cursor:pointer}button,a{transition:background .2s,color .2s,transform .2s,border-color .2s}button:focus-visible,a:focus-visible,input:focus-visible,textarea:focus-visible{outline:2px solid var(--gold);outline-offset:5px}button:disabled{opacity:.35;cursor:not-allowed}a{color:inherit;text-decoration:none}button{color:inherit}h1,h2,h3,p{margin:0}button:hover:not(:disabled){transform:translateY(-2px)}.site-header{height:100px;max-width:1320px;padding:0 56px;margin:auto;display:flex;align-items:center;justify-content:space-between;border-bottom:1px solid var(--line)}.brand{font-family:var(--serif);font-size:19px;letter-spacing:2.1px;display:flex;align-items:center;gap:12px}.brand-icon{font:36px var(--serif);color:var(--gold)}nav{display:flex;align-items:center;gap:36px}.nav-link{background:none;border:0;color:var(--muted);font-size:12px}.nav-cta{background:transparent;border:1px solid #685438;padding:12px 20px;font-size:12px;color:var(--gold)}.nav-cta span{margin-left:22px}.hero{max-width:1320px;margin:auto;min-height:650px;display:grid;grid-template-columns:1fr 1fr;padding:44px 56px 50px;gap:30px}.hero-copy{padding:42px 0 20px}.eyebrow{font-size:10px;color:var(--gold);letter-spacing:2.5px;font-weight:500;display:flex;align-items:center;gap:12px}.eyebrow>span{width:20px;height:1px;background:var(--gold)}h1{font:500 clamp(76px,7.5vw,108px)/.94 var(--serif);letter-spacing:-3px;margin:29px 0 28px}h1 em{color:var(--gold);font-weight:400}.title-dot{color:var(--gold)}.hero h2{font-size:19px;font-weight:500;letter-spacing:-.5px}.hero-desc{font-size:13px;line-height:1.9;color:var(--muted);margin-top:17px}.primary{border:1px solid var(--gold);background:var(--gold);color:#1c1913;padding:16px 24px;font-weight:600;font-size:13px;display:inline-flex;align-items:center;justify-content:center;gap:28px}.primary:hover:not(:disabled){background:#dfbf88}.hero-button{margin-top:31px;min-width:218px;justify-content:space-between}.micro{color:#908879;font-size:10px;margin-top:16px;letter-spacing:.4px}.micro span{padding:0 10px}.hero-art{position:relative;min-height:558px;overflow:hidden;background:#32271d url('https://images.unsplash.com/photo-1527281400683-1aae777175f8?auto=format&fit=crop&w=1200&q=85') center 55%/cover;border:1px solid #45372a}.art-shade{position:absolute;inset:0;background:linear-gradient(180deg,rgba(20,15,9,.08) 30%,rgba(16,13,9,.88)),linear-gradient(90deg,rgba(35,24,14,.2),transparent)}.compass-mark{position:absolute;top:30px;right:30px;width:116px;height:116px;border:1px solid #c9a76b77;border-radius:50%;color:#e7c78c;text-align:center;display:flex;flex-direction:column;align-items:center;justify-content:center}.compass-mark span{font:10px var(--serif);position:absolute;top:6px}.compass-mark i{font:78px/.8 var(--serif);font-style:normal}.compass-mark small{font-size:4px;letter-spacing:1.4px;margin-top:7px}.art-caption{position:absolute;bottom:55px;left:35px}.art-caption>span{font-size:8px;letter-spacing:2.3px;color:#c3a472}.art-caption p{font-family:var(--serif),'Noto Sans KR',serif;font-size:24px;line-height:1.6;font-weight:400;margin-top:13px}.photo-index{position:absolute;bottom:19px;right:25px;font-size:8px;letter-spacing:1.8px;color:#c7b598}.journey{max-width:1208px;margin:0 auto;border-top:1px solid var(--line);padding:48px 0 46px;display:grid;grid-template-columns:1fr 1.3fr;gap:90px}.section-intro h2{font-size:27px;line-height:1.5;font-weight:400;letter-spacing:-1px;margin-top:20px}.section-intro>p:last-child{color:var(--muted);font-size:12px;line-height:1.9;margin-top:18px}.journey-steps article{display:flex;align-items:center;gap:25px;padding:22px 0;border-bottom:1px solid var(--line)}.journey-steps article:first-child{padding-top:6px}.journey-steps article:last-child{border:0}.step-number{font:italic 25px var(--serif);color:var(--gold)}.journey-steps h3{font-size:15px;font-weight:500}.journey-steps p{font-size:11px;color:var(--muted);margin-top:9px}.step-symbol{margin-left:auto;color:var(--gold);font-size:28px;font-family:var(--serif)}.flavor-strip{max-width:1208px;margin:auto;border-top:1px solid var(--line);border-bottom:1px solid var(--line);display:flex;justify-content:space-between;align-items:center;padding:24px 0}.flavor-strip>span{font-size:8px;letter-spacing:2px;color:var(--muted)}.flavor-strip p{font:16px var(--serif);letter-spacing:2px;color:var(--gold)}.flavor-strip i{font-style:normal;color:#726247;padding:0 12px}footer{max-width:1320px;margin:auto;padding:36px 56px;display:flex;align-items:center;gap:25px}footer .brand{font-size:12px;letter-spacing:1.2px}footer .brand-icon{font-size:24px}footer p{font-size:10px;color:var(--muted)}footer small{font-size:9px;color:#827b6d;margin-left:auto}.mobile-break{display:none}[hidden]{display:none!important}.view{animation:appear .45s ease both}@keyframes appear{from{opacity:0;transform:translateY(12px)}to{opacity:1;transform:translateY(0)}}.survey-view{max-width:760px;min-height:690px;margin:auto;padding:55px 24px}.survey-top{display:flex;justify-content:space-between;color:var(--gold);font-size:11px;letter-spacing:1px}.progress{height:3px;background:var(--line);margin:16px 0 34px}.progress div{height:100%;background:var(--gold);transition:width .3s}.step-label{font:italic 25px var(--serif);color:var(--gold)}.survey-view h1{font:500 28px/1.5 'Noto Sans KR',sans-serif;letter-spacing:-1px;margin:12px 0}.help{font-size:12px;line-height:1.8;color:var(--muted)}.options{display:grid;gap:12px;margin:30px 0}.option{position:relative;display:flex;gap:18px;align-items:center;background:var(--panel);border:1px solid var(--line);padding:23px;cursor:pointer;transition:border-color .2s,background .2s}.option:hover,.option:has(input:checked){border-color:var(--gold);background:#2b261c}.option input{accent-color:var(--gold);width:17px;height:17px;margin:0}.option>span{flex:1}.option small{display:block;color:var(--muted);font-size:11px;margin-top:7px}.option:has(input:checked):after{content:'✓';color:var(--gold)}.survey-actions{display:flex;align-items:center;justify-content:space-between;margin-top:32px}.secondary{border:1px solid var(--line);padding:15px 22px;background:transparent;color:var(--cream);font-size:12px}.secondary:hover{border-color:var(--gold);background:#29251c}.sliders{margin-top:25px;display:grid;gap:22px}.slider-head{display:flex;align-items:center;justify-content:space-between;margin-bottom:8px}.slider-head label{font-size:13px}.slider-head small{font-size:10px;color:var(--muted);margin-left:10px}.slider-head output{color:var(--gold);font:25px var(--serif)}.slider-head output span{font:10px sans-serif;color:var(--muted)}input[type=range]{width:100%;accent-color:var(--gold);cursor:pointer;height:20px}.slider-scale{display:flex;justify-content:space-between;color:var(--muted);font-size:9px;margin-top:2px}.results-view{max-width:1208px;margin:auto;padding:55px 0 25px}.results-intro{text-align:center}.results-intro .eyebrow{justify-content:center}.results-view h1{font:500 30px/1.5 'Noto Sans KR',sans-serif;letter-spacing:-1.1px;margin:16px 0 12px}.taste-panel{margin:35px 0 45px;border:1px solid var(--line);background:var(--panel);display:grid;grid-template-columns:1fr 1fr;align-items:center;padding:25px 50px}.taste-panel h2{font-size:21px;font-weight:500;margin:12px 0 20px}.profile-pills{display:flex;gap:8px;flex-wrap:wrap}.pill{font-size:10px;border:1px solid #4e4432;padding:7px 10px;color:#d1bd98}.flavor-values{margin-top:20px;color:var(--muted);font-size:12px;line-height:2}.radar{width:100%;max-width:350px;justify-self:center;height:260px}.results-title{display:flex;align-items:end;justify-content:space-between;margin-bottom:20px}.results-title h2{font-size:24px;font-weight:400}.results-title h2 em{font:italic 32px var(--serif);color:var(--gold);margin-left:10px}.results-title small{color:var(--muted);font-size:11px}.result-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:18px}.whisky-card{background:var(--panel);border:1px solid var(--line);padding:25px;display:flex;flex-direction:column;position:relative}.whisky-card:first-child{border-color:#8f7448}.card-top{display:flex;align-items:center;justify-content:space-between}.rank{font:italic 32px var(--serif);color:var(--gold)}.match{font-size:10px;color:var(--gold)}.match strong{font:32px var(--serif);margin-left:6px}.bottle-art{height:150px;display:flex;justify-content:center;align-items:center;margin:10px 0 17px;background:radial-gradient(ellipse at 50% 70%,#8e67352c,transparent 65%)}.bottle{position:relative;width:54px;height:110px;background:linear-gradient(90deg,#3b2d1699,#9c6a2b99 40%,#46351cbb);border:1px solid #ac925259;border-radius:15px 15px 8px 8px;box-shadow:inset 7px 0 8px #e5c16a0f,0 9px 12px #0005}.bottle:before{content:'';position:absolute;top:-28px;left:17px;width:18px;height:30px;background:linear-gradient(#c2a66a 0 25%,#594725 25%);border-radius:3px 3px 0 0}.bottle-label{position:absolute;top:38px;left:4px;right:4px;background:#ded0ac;color:#3f301c;text-align:center;font:9px var(--serif);padding:10px 2px;border-top:2px solid #927545;border-bottom:2px solid #927545}.bottle-label small{font-size:6px;display:block;margin-top:3px}.bottle-art>small{position:absolute;right:25px;color:#7e7565;font-size:8px;align-self:end}.card-type{font-size:10px;color:var(--gold);margin-bottom:8px}.whisky-card h3{font-size:18px;font-weight:500;line-height:1.5}.english{font:15px var(--serif);color:var(--muted);margin-top:3px}.notes{display:flex;flex-wrap:wrap;gap:5px;margin:17px 0}.notes span{font-size:10px;color:#c0b7a5;padding:5px 7px;background:#302b22}.reason{font-size:12px;line-height:1.9;color:var(--muted);margin-bottom:20px;flex:1}.card-meta{border-top:1px solid var(--line);padding-top:15px;display:flex;justify-content:space-between;font-size:11px;line-height:1.9}.card-meta small{display:block;color:var(--muted);font-size:9px}.detail-button{margin-top:18px;width:100%;display:flex;justify-content:space-between}.notice{border:1px solid #8f7448;background:#3a2c1c;padding:15px;line-height:1.7;margin-bottom:18px;color:#dfc08b;font-size:12px}.data-note{color:var(--muted);font-size:10px;line-height:1.9;margin-top:20px}.result-actions{display:flex;gap:12px;justify-content:center;margin:35px 0}.method{border-top:1px solid var(--line);padding-top:20px;font-size:11px;color:var(--muted);line-height:1.9}.method summary{cursor:pointer;color:#c7b48f}.method p{margin-top:12px}dialog{background:var(--panel);color:var(--cream);border:1px solid #736042;padding:38px;width:min(570px,calc(100% - 32px));max-height:85vh;overflow:auto}dialog::backdrop{background:#000b;backdrop-filter:blur(5px)}.close{position:absolute;right:12px;top:8px;background:none;border:0;font-size:28px;color:var(--muted)}dialog h2{font-size:23px;line-height:1.5;margin:10px 0}dialog h3{font-size:14px;margin:24px 0 12px}dialog p,dialog li{font-size:12px;color:var(--muted);line-height:1.9}dialog li{margin-bottom:8px}dialog ul{padding-left:18px}dialog a{color:var(--gold);font-size:12px;text-decoration:underline}dialog textarea{width:100%;min-height:230px;background:var(--bg);color:var(--cream);padding:12px;border:1px solid var(--line);margin:15px 0;font:12px/1.8 sans-serif}.score-line{display:flex;justify-content:space-between;font-size:12px;padding:7px 0;color:var(--muted)}#toast{position:fixed;bottom:25px;left:50%;transform:translateX(-50%);max-width:90vw;background:var(--cream);color:var(--bg);padding:12px 22px;border-radius:3px;opacity:0;pointer-events:none;transition:opacity .2s;font-size:12px;z-index:5}#toast.show{opacity:1}@media(min-width:1440px){.hero{min-height:700px;padding-top:60px}.hero-art{min-height:580px}.hero-copy{padding-top:50px}}@media(max-width:1260px){.journey,.flavor-strip,.results-view{margin-left:40px;margin-right:40px}.hero{padding-left:40px;padding-right:40px}.site-header{padding:0 40px}.journey{gap:50px}footer{padding-left:40px;padding-right:40px}}@media(max-width:850px){.hero{gap:20px;min-height:600px}.hero-art{min-height:500px}h1{font-size:80px}.hero h2{font-size:16px}.hero-copy{padding-top:35px}.eyebrow{font-size:8px}.hero-desc{font-size:11px}.art-caption{left:23px}.art-caption p{font-size:20px}.journey{gap:30px}.section-intro h2{font-size:24px}.journey-steps article{gap:16px}.journey-steps h3{font-size:13px}.journey-steps p{font-size:10px}.flavor-strip{flex-direction:column;gap:15px}.result-grid{grid-template-columns:1fr}.whisky-card{padding:26px}.bottle-art{height:140px}.taste-panel{padding:20px}.results-view h1{font-size:26px}footer{flex-wrap:wrap;gap:14px}footer small{width:100%;margin-left:0}.reason{margin-bottom:15px}}@media(max-width:700px){.site-header{height:77px;padding:0 22px}.brand{font-size:13px;letter-spacing:1.4px;gap:7px}.brand-icon{font-size:28px}nav{gap:0}.nav-link{display:none}.nav-cta{padding:9px 10px;font-size:10px}.nav-cta span{margin-left:8px}.hero{grid-template-columns:1fr;padding:30px 22px;gap:32px}.hero-copy{padding:10px 0 0;text-align:center}.hero-copy .eyebrow{justify-content:center;font-size:8px}h1{font-size:83px;margin:25px 0;line-height:.95}.hero h2{font-size:16px}.hero-desc{font-size:12px}.hero-button{margin-top:25px}.hero-art{min-height:375px}.mobile-break{display:block}.compass-mark{width:90px;height:90px;top:20px;right:20px}.compass-mark i{font-size:60px}.compass-mark small{font-size:3px}.art-caption{bottom:45px;left:24px}.art-caption p{font-size:21px}.journey{margin:0 22px;padding:30px 0;grid-template-columns:1fr;gap:28px}.section-intro h2{font-size:24px}.journey-steps article{padding:20px 0}.journey-steps h3{font-size:14px}.flavor-strip{margin:0 22px;padding:24px 0}.flavor-strip p{font-size:12px;letter-spacing:1px}.flavor-strip i{padding:0 5px}footer{padding:25px 22px;gap:12px}footer p{font-size:9px}footer small{font-size:8px}.survey-view{padding:35px 22px;min-height:650px}.survey-view h1{font-size:23px}.option{padding:20px 17px}.survey-actions .primary{gap:15px;padding:16px 18px}.results-view{margin:0 22px;padding-top:35px}.results-view h1{font-size:24px}.taste-panel{grid-template-columns:1fr;gap:15px;padding:25px}.radar{height:245px}.results-title{align-items:start;gap:8px;flex-direction:column}.results-title h2{font-size:22px}.result-actions{flex-wrap:wrap}.result-actions button{flex:1;white-space:nowrap;padding:14px}.sliders{gap:23px}dialog{padding:32px 24px}}@media(prefers-reduced-motion:reduce){*,*:before,*:after{animation:none!important;transition:none!important;scroll-behavior:auto!important}}
+
+import assert from 'node:assert/strict';
+import {whiskies} from '../dist/data.js';
+import {recommend,fitsBudget,WEIGHTS} from '../dist/recommend.js';
+assert.ok(whiskies.length>=12);assert.equal(new Set(whiskies.map(w=>w.id)).size,whiskies.length);
+for(const w of whiskies){assert.equal(w.flavors.length,5);assert.ok(w.flavors.every(v=>v>=0&&v<=5));assert.ok(w.price[0]<=w.price[1]);assert.ok(w.source.startsWith('https://'));}
+assert.equal(Object.values(WEIGHTS).reduce((a,b)=>a+b),1);
+const base={experience:0,budget:1,serving:'neat',flavors:[3,5,0,1,2]};
+const fruity=recommend(base),smoky=recommend({...base,experience:2,budget:2,flavors:[2,1,5,3,3]});
+assert.notEqual(fruity.items[0].id,smoky.items[0].id);assert.equal(smoky.items[0].id,'laph');
+for(let b=0;b<4;b++){const r=recommend({...base,budget:b});assert.equal(r.items.length,3);assert.equal(new Set(r.items.map(w=>w.id)).size,3);assert.ok(r.items.every(w=>w.score>=0&&w.score<=100));const count=whiskies.filter(w=>fitsBudget(w,b)).length;assert.equal(r.items.filter(w=>w.inBudget).length,Math.min(3,count));}
+assert.ok(recommend({...base,budget:3}).notice.includes('2종'));
+assert.ok(recommend(base,whiskies.filter(w=>!fitsBudget(w,1))).notice.includes('없어'));
+assert.deepEqual(recommend(base),recommend(base));
+assert.throws(()=>recommend({...base,flavors:[6,0,0,0,0]}));
+const target=whiskies.find(w=>w.id==='gf12');assert.equal(recommend({...base,flavors:target.flavors},[target]).items[0].score,100);
+const highball=recommend({...base,serving:'highball'},[target]).items[0];assert.ok(highball.score<100);
+const intense=whiskies.find(w=>w.id==='laph');assert.ok(recommend({...base,experience:2},[intense]).items[0].score>recommend({...base,experience:0},[intense]).items[0].score);
+console.log('PASS: data integrity, 4 budget bands, flavor ranking, experience and serving weights, deterministic scoring, score bounds, fallback and invalid input.');
